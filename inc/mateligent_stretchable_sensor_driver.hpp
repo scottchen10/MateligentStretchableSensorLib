@@ -3,7 +3,7 @@
  * description: Implements the Mateligent Flex Sensor communication interface for the AX-008-05 Firmware.
  *              See folder /docs/ for more details.
  * author:      Scott Chen  
- * date:        07/03/2026
+ * date:        07/06/2026
  */
 
 #include <cstdint>
@@ -36,7 +36,7 @@ public:
         kOther,
     };
 
-    enum class OutputDataType : uint8_t
+    enum class OutputMode : uint8_t
     {
         kBinary = 0,
         kCharacter,
@@ -54,10 +54,10 @@ public:
         float temperature_k;
     };
 
-    explicit StretchSensor(const PlatformUart& uart_interface);
+    explicit StretchSensor(const PlatformUart& uart_interface): uart_(uart_interface) {}
 
     // Measurements
-    Result readMeasurement(CalibratedMeasurement& out_measurement);
+    Result readMeasurement(CalibratedMeasurement& out_measurement, OutputMode mode, uint32_t timeout_ms=100);
 
     // Calibration
     Result performZeroCalibration();
@@ -88,8 +88,8 @@ public:
     Result setLedConfig(LedConfig config);
     Result getLedConfig(LedConfig& out_config);
 
-    Result setOutputDataType(OutputDataType type);
-    Result getOutputDataType(OutputDataType& out_type);
+    Result setOutputDataType(OutputMode type);
+    Result getOutputDataType(OutputMode& out_type);
 
     Result setCalibrationCurrent(uint16_t current_nA);
     Result getCalibrationCurrent(uint16_t& out_current_nA);
@@ -110,7 +110,13 @@ public:
     Result sensorSleep();
     Result enterBootloader();
 private:
+    Result sendCommandAndGetResponse(const char* cmd, size_t cmd_len, char* out_buf, size_t buf_len, uint32_t timeout_ms=10);
+    Result setUintCommand(const char* command, uint32_t value);
+    Result queryUintCommand(const char* command, uint16_t& value);
+    Result setBoolCommand(const char* command, bool value);
+    Result sendSimpleCommand(const char* command);
+   
     PlatformUart uart_;
 };
 
-}
+} // namespace Mateligent
