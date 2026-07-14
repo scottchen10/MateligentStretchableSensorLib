@@ -7,16 +7,19 @@
  */
 
 #include <cstdint>
+#include <variant>
+
 namespace Mateligent
 {
 
 enum class Result: uint8_t
 {
-    kOkay,
+    kSuccess,
+    kParseError,
     kUartError,
     kTimeout,
     kChecksumError,
-    kMeasurementOverflow,
+    kMeasurementFailed,
     kCalibrationNotComplete,
 };
 
@@ -39,13 +42,15 @@ public:
     enum class OutputMode : uint8_t
     {
         kBinary = 0,
-        kCharacter,
+        kAscii,
     };
-
+    
     struct CalibratedMeasurement
     {
         float percentage_stretch;
         float temperature_k;
+        OutputMode mode; 
+        uint8_t status_flags;
     };
 
     struct RawMeasurement
@@ -57,7 +62,7 @@ public:
     explicit StretchSensor(const PlatformUart& uart_interface): uart_(uart_interface) {}
 
     // Measurements
-    Result readMeasurement(CalibratedMeasurement& out_measurement, OutputMode mode, uint32_t timeout_ms=100);
+    static Result parseMeasurement(const uint8_t *data, size_t len, std::variant<CalibratedMeasurement, RawMeasurement>& out_measurement);
 
     // Calibration
     Result performZeroCalibration();
