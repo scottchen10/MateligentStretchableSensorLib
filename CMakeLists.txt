@@ -18,6 +18,13 @@ target_include_directories(mateligent_stretch_sensor_lib
         ${CMAKE_CURRENT_SOURCE_DIR}/inc
 )
 
+add_subdirectory(external/etl)
+
+target_link_libraries(mateligent_stretch_sensor_lib
+    PRIVATE
+        etl::etl
+    )
+
 if (BUILD_TESTS)
     include(FetchContent)
     FetchContent_Declare(
