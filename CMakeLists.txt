@@ -10,12 +10,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_library(mateligent_stretch_sensor_lib 
     STATIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/mateligent_stretchable_sensor_driver.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/stretchable_sensor_parser.cpp
 )
 
 target_include_directories(mateligent_stretch_sensor_lib
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/inc
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 add_subdirectory(external/etl)

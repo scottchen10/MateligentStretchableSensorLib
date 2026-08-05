@@ -1,6 +1,8 @@
 #include <cstdint>
-#include "etl/queue.h"
+#include <optional>
+
 #include "etl/circular_buffer.h"
+#include "etl/string.h"
 
 #include "stretchable_sensor_data.hpp"
 
@@ -9,18 +11,22 @@ namespace Mateligent::StretchableSensor
 
 class Parser
 {
+// A message can either be a pure ASCII response 
+// ASCII responses are either terminated by one or two carriage returns
+// One carriage return indicates an ECHO
+// Two carriage returns indicate a RESP
 
-enum class State
-{
-    
-};
-
+// Or a binary data message that is 5 bytes long. THis is guranteed to have one byte 
 public:
-    void feed(const uint8_t byte);
-
+    std::optional<Message> feed(const uint8_t byte);
 private:
-    etl::circular_buffer<int, 8> parse_events_;
-    
+    uint8_t checksum_value_ = 0x00;
+    etl::circular_buffer<uint8_t, 6> prev_bytes_;
+    CalibratedMeasurement binary_measurement{};
+
+    etl::string<16> ascii_str_;
+    std::optional<Message> feedAsciiParser(const uint8_t byte);
+    std::optional<Message> feedBinaryParser(const uint8_t byte);
 };
 
 } // namespace Mateligent::StretchableSensor

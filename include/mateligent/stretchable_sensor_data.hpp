@@ -1,6 +1,6 @@
 #include <cstdint>
 #include <variant>
-#include "etl/string.h"
+#include "etl/string_view.h"
 
 namespace Mateligent::StretchableSensor
 {
@@ -27,6 +27,7 @@ enum class Setting : uint8_t
     kConfigreLed,            // 3av
     kCalibrationCurrent,     // 3avi
     kConfigurePollingRate,   // 3avii
+    kCalibrationSpan,        // 3aix
     kCalibrationTemperature, // 3ax
     kCalibrationZero,        // 3axi
     kSerialNumberOne, // 3bi
@@ -34,8 +35,45 @@ enum class Setting : uint8_t
     kSensorAveraging, // 3biii
     kSensorFirmware,  // 3biv
     kSensorLength,    // 3bvi
-    kSensorNumber,    // 3bvii
+    kSerialNumber,    // 3bvii
 };
+
+struct CommandMapping
+{
+    etl::string_view command;
+    Setting setting;
+};
+
+constexpr CommandMapping kCommandMappings[] = {
+    {"CA", Setting::kConfigurePwm},
+    {"CC", Setting::kCalibrationTempCoeff},
+    {"CD", Setting::kCharacterData},
+    {"CL", Setting::kConfigreLed},
+    {"CI", Setting::kCalibrationCurrent},
+    {"CP", Setting::kConfigurePollingRate},
+    {"CS", Setting::kCalibrationSpan},
+    {"CT", Setting::kCalibrationTemperature},
+    {"CZ", Setting::kCalibrationZero},
+    {"S1", Setting::kSerialNumberOne},
+    {"S2", Setting::kSerialNumberTwo},
+    {"SA", Setting::kSensorAveraging},
+    {"SF", Setting::kSensorFirmware},
+    {"SL", Setting::kSensorLength},
+    {"SN", Setting::kSerialNumber},
+};
+
+inline Setting commandToSetting(etl::string_view command)
+{
+    for (const auto& mapping : kCommandMappings)
+    {
+        if (mapping.command == command)
+        {
+            return mapping.setting;
+        }
+    }
+
+    return Setting::kUnknown;
+}
 
 // Settings can only be defined as string or 2 byte integer responses
 struct StringSetting
@@ -77,8 +115,8 @@ struct RawMeasurement
 
 using Message = std::variant<CalibratedMeasurement,
                              RawMeasurement,
-                             StringSetting,
                              LogMessage,
+                             StringSetting,
                              IntegerSetting>;
 
 } // namespace Mateligent::StetchableSensor
