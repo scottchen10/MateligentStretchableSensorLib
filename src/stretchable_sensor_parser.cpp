@@ -246,21 +246,47 @@ std::optional<Message> Parser::feedBinaryParser(const uint8_t byte)
     };
 }
 
-std::optional<Message> Parser::feed(const uint8_t byte)
+void Parser::reset()
+{
+    cmd_str_.erase(0, cmd_str_.size());
+}
+
+bool Parser::feed(const uint8_t byte)
 {
     std::optional<Message> ascii_parser_result = feedAsciiParser(byte);
     std::optional<Message> binary_parser_result = feedBinaryParser(byte);
 
     if (ascii_parser_result.has_value())
     {
-        return ascii_parser_result;
+        if (queued_messages_.full())
+        {
+            queued_messages_.pop();
+        }
+        queued_messages_.push(ascii_parser_result.value());
+        return true;
     }
     else if (binary_parser_result.has_value())
     {
-        return binary_parser_result;
+        if (queued_messages_.full())
+        {
+            queued_messages_.pop();
+        }
+        queued_messages_.push(binary_parser_result.value());
+        return true;
     }
 
-    return std::nullopt;
+    return false;
+}
+
+std::optional<Message> Parser::consume()
+{
+    if (queued_messages_.empty())
+    {
+        return std::nullopt;
+    }
+    Message msg = queued_messages_.front();
+    queued_messages_.pop();
+    return msg;
 }
 
 } // namespace Mateligent::StretchableSensor

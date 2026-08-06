@@ -1,19 +1,10 @@
 #include <cstdint>
 #include <variant>
+#include <stdio.h>
 #include "etl/string_view.h"
 
 namespace Mateligent::StretchableSensor
 {
-
-// Single event commands
-// Defined in the "Commands" sectin
-// Citations to the specific command referenced are shown below
-enum class Command : uint8_t
-{
-    kCalibrationBurst,    // 3aii
-    kConfigurationRecord, // 3aviii
-    kSensorSleep,         // 3bvii
-};
 
 // Settings available to be read
 // Defined in the "Commands:" section
@@ -21,6 +12,9 @@ enum class Command : uint8_t
 enum class Setting : uint8_t
 {
     kUnknown,                // To handle cases where the sensor outputs a log message
+    kCalibrationBurst,    // 3aii
+    kConfigurationRecord, // 3aviii
+    kSensorSleep,         // 3bvii
     kConfigurePwm,           // 3ai
     kCalibrationTempCoeff,   // 3aiii
     kCharacterData,          // 3aiv
@@ -40,13 +34,16 @@ enum class Setting : uint8_t
 
 struct CommandMapping
 {
-    etl::string_view command;
+    char command[3];
     Setting setting;
 };
 
 constexpr CommandMapping kCommandMappings[] = {
     {"CA", Setting::kConfigurePwm},
     {"CC", Setting::kCalibrationTempCoeff},
+    {"CB", Setting::kCalibrationBurst},
+    {"CR", Setting::kConfigurationRecord},
+    {"SS", Setting::kSensorSleep},
     {"CD", Setting::kCharacterData},
     {"CL", Setting::kConfigreLed},
     {"CI", Setting::kCalibrationCurrent},
@@ -62,6 +59,19 @@ constexpr CommandMapping kCommandMappings[] = {
     {"SN", Setting::kSerialNumber},
 };
 
+inline const char* settingToCommand(Setting setting)
+{
+    for (const auto& mapping : kCommandMappings)
+    {
+        if (mapping.setting == setting)
+        {
+            return mapping.command;
+        }
+    }
+
+    return "";    
+}
+
 inline Setting commandToSetting(etl::string_view command)
 {
     for (const auto& mapping : kCommandMappings)
@@ -73,6 +83,12 @@ inline Setting commandToSetting(etl::string_view command)
     }
 
     return Setting::kUnknown;
+}
+
+inline void buildSettingCommand(Setting setting, uint16_t count, char *buffer, size_t len)
+{
+    
+    snprintf(buffer, len, "%s=%d\r", settingToCommand(setting), count);
 }
 
 // Settings can only be defined as string or 2 byte integer responses

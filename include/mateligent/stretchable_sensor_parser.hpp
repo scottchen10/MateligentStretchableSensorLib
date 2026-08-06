@@ -18,7 +18,9 @@ class Parser
 
 // Or a binary data message that is 5 bytes long. THis is guranteed to have one byte 
 public:
-    std::optional<Message> feed(const uint8_t byte);
+    bool feed(const uint8_t byte);
+    std::optional<Message> consume();
+    void reset();
 private:
     uint8_t checksum_value_ = 0x00;
     etl::circular_buffer<uint8_t, 6> prev_bytes_;
@@ -26,6 +28,7 @@ private:
 
     etl::string<16> cmd_str_;
 
+    etl::circular_buffer<Message, 3> queued_messages_;
     std::optional<Message> feedAsciiParser(const uint8_t byte);
     std::optional<Message> feedBinaryParser(const uint8_t byte);
 };
