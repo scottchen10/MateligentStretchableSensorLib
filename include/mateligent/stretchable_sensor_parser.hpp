@@ -24,7 +24,8 @@ private:
     etl::circular_buffer<uint8_t, 6> prev_bytes_;
     CalibratedMeasurement binary_measurement{};
 
-    etl::string<16> ascii_str_;
+    etl::string<16> cmd_str_;
+
     std::optional<Message> feedAsciiParser(const uint8_t byte);
     std::optional<Message> feedBinaryParser(const uint8_t byte);
 };

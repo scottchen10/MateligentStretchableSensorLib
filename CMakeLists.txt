@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 4.0)
 
-option(BUILD_TESTS OFF)
+option(BUILD_STRETCHABLE_SENSOR_TESTS ON)
 
 project(mateligent_stretch_sensor_lib)
 
@@ -21,11 +21,11 @@ target_include_directories(mateligent_stretch_sensor_lib
 add_subdirectory(external/etl)
 
 target_link_libraries(mateligent_stretch_sensor_lib
-    PRIVATE
+    PUBLIC
         etl::etl
     )
 
-if (BUILD_TESTS)
+if (BUILD_STRETCHABLE_SENSOR_TESTS)
     include(FetchContent)
     FetchContent_Declare(
         googletest

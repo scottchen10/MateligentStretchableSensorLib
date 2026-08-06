@@ -1,210 +1,275 @@
-#include "mateligent_stretchable_sensor_driver.hpp"
+#include "mateligent/stretchable_sensor_parser.hpp"
+#include "gtest/gtest.h"
+#include <optional>
+#include <variant>
 
-#include <gtest/gtest.h>
-#include <numeric>
-#include <memory>
+using namespace Mateligent::StretchableSensor;
 
-using namespace Mateligent;
-
-class ParseMeasurementsTest : public ::testing::Test
+class ParserTest : public ::testing::Test
 {
 protected:
-    std::variant<StretchSensor::CalibratedMeasurement, StretchSensor::RawMeasurement> measurement;
+    Parser parser_;
+
+    std::optional<Message> feed(std::string_view str)
+    {
+        std::optional<Message> result;
+
+        for (uint8_t byte : str)
+        {
+            auto msg = parser_.feed(byte);
+            if (msg)
+            {
+                result = std::move(msg);
+            }
+        }
+
+        return result;
+    }
+
+    std::optional<Message> feed(std::initializer_list<uint8_t> bytes)
+    {
+        std::optional<Message> result;
+
+        for (uint8_t byte : bytes)
+        {
+            auto msg = parser_.feed(byte);
+            if (msg)
+            {
+                result = std::move(msg);
+            }
+        }
+
+        return result;
+    }
 };
 
-std::array<uint8_t, 2> createRawTemperature(float temperature)
+
+TEST_F(ParserTest, ParsesCalibratedAsciiMeasurement)
 {
-    std::array<uint8_t, 2> bytes{};
+    std::optional<Message> msg = feed("123.45%,295.5K\r");
 
-    uint16_t raw_temperature = static_cast<uint16_t>(temperature * 10.0f);
-
-    bytes[0] = static_cast<uint8_t>(raw_temperature >> 8);
-    bytes[1] = static_cast<uint8_t>(raw_temperature);
-
-    return bytes;
+    ASSERT_TRUE(msg.has_value());
+    auto* measurement = std::get_if<CalibratedMeasurement>(&*msg);
+    ASSERT_NE(measurement, nullptr);
+    EXPECT_FLOAT_EQ(measurement->percentage_stretch, 123.45f);
+    EXPECT_FLOAT_EQ(measurement->temperature_k, 295.5f);
+    EXPECT_EQ(measurement->mode, MeasurementFormat::kAscii);
 }
 
-std::array<uint8_t, 2> createRawStretch(float stretch_percent)
+TEST_F(ParserTest, ParsesCalibratedAsciiMeasurementWithSpaces)
 {
-    std::array<uint8_t, 2> bytes{};
+    std::optional<Message> msg = feed("    .45%, 295.5K\r");
 
-    uint16_t raw_stretch = static_cast<uint16_t>(stretch_percent * 100.0f);
-
-    bytes[0] = static_cast<uint8_t>(raw_stretch >> 8);
-    bytes[1] = static_cast<uint8_t>(raw_stretch);
-
-    return bytes;
+    ASSERT_TRUE(msg.has_value());
+    auto* measurement = std::get_if<CalibratedMeasurement>(&*msg);
+    ASSERT_NE(measurement, nullptr);
+    EXPECT_FLOAT_EQ(measurement->percentage_stretch, 0.45f);
+    EXPECT_FLOAT_EQ(measurement->temperature_k, 295.5f);
+    EXPECT_EQ(measurement->mode, MeasurementFormat::kAscii);
 }
 
-std::array<uint8_t, 6> createBinaryMeasurement(float stretch_percent, float temperature_k, uint8_t status)
+TEST_F(ParserTest, ParsesNoisyCalibratedAsciiMeasurementWithSpaces)
 {
-    auto raw_stretch = createRawStretch(stretch_percent);
-    auto raw_temp = createRawTemperature(temperature_k);
+    std::optional<Message> msg = feed("AXInitializing..    .45%, 295.5K\r\r\r");
 
-    std::array<uint8_t, 6> measurement = {
-        raw_temp[0], raw_temp[1],
-        raw_stretch[0], raw_stretch[1],
-        status,
-    };
-
-    measurement[5] = std::accumulate(measurement.begin(), measurement.begin() + 5, 0);
-
-    return measurement;
+    ASSERT_TRUE(msg.has_value());
+    auto* measurement = std::get_if<CalibratedMeasurement>(&*msg);
+    ASSERT_NE(measurement, nullptr);
+    EXPECT_FLOAT_EQ(measurement->percentage_stretch, 0.45f);
+    EXPECT_FLOAT_EQ(measurement->temperature_k, 295.5f);
+    EXPECT_EQ(measurement->mode, MeasurementFormat::kAscii);
 }
 
-std::array<uint8_t, 6> createBinaryMeasurement(uint16_t raw_stretch, uint16_t raw_temp, uint8_t status)
+TEST_F(ParserTest, ParsesRawAsciiMeasurement)
 {
-    std::array<uint8_t, 6> measurement = {
-        static_cast<uint8_t>(raw_temp >> 8), static_cast<uint8_t>(raw_temp),
-        static_cast<uint8_t>(raw_stretch >> 8), static_cast<uint8_t>(raw_stretch),
-        status,
-    };
+    std::optional<Message> msg = feed("10211, 295.5K\r");
 
-    measurement[5] = std::accumulate(measurement.begin(), measurement.begin() + 5, 0);
-
-    return measurement;
+    ASSERT_TRUE(msg.has_value());
+    auto* measurement = std::get_if<RawMeasurement>(&*msg);
+    ASSERT_NE(measurement, nullptr);
+    EXPECT_EQ(measurement->raw_count, 10211);
+    EXPECT_FLOAT_EQ(measurement->temperature_k, 295.5f);
 }
 
-
-TEST_F(ParseMeasurementsTest, ParsesBinaryCalibratedMeasurement)
+TEST_F(ParserTest, ParsesBinaryMeasurement)
 {
-    constexpr float temperature_k = 300.0f;
-    constexpr float stretch_percent = 100.0f;
+    std::optional<Message> msg = feed({0x0b, 0xb9, 0x00, 0x41, 0x00, 0x05});
 
-    auto packet = createBinaryMeasurement(stretch_percent, temperature_k, 0x00);
-    std::variant<StretchSensor::CalibratedMeasurement, StretchSensor::RawMeasurement> measurement{};
-
-    Result result = StretchSensor::parseMeasurement(
-            packet.data(),
-            packet.size(),
-            measurement);
-
-    EXPECT_EQ(result, Result::kSuccess);
-    ASSERT_TRUE(std::holds_alternative<StretchSensor::CalibratedMeasurement>(measurement));
-
-    auto value = std::get<StretchSensor::CalibratedMeasurement>(measurement);
-    EXPECT_FLOAT_EQ(value.temperature_k, temperature_k);
-    EXPECT_FLOAT_EQ(value.percentage_stretch, stretch_percent);
-    EXPECT_EQ(value.mode, StretchSensor::OutputMode::kBinary);
-    EXPECT_EQ(value.status_flags, 0x00);
+    ASSERT_TRUE(msg.has_value());
+    auto* measurement = std::get_if<CalibratedMeasurement>(&*msg);
+    ASSERT_NE(measurement, nullptr);
+    EXPECT_FLOAT_EQ(measurement->percentage_stretch, 0.65f);
+    EXPECT_FLOAT_EQ(measurement->temperature_k, 300.1f);
+    EXPECT_EQ(measurement->mode, MeasurementFormat::kBinary);
 }
 
-
-TEST_F(ParseMeasurementsTest, RejectsBinaryChecksumFailure)
+TEST_F(ParserTest, ParsesNoisyBinaryMeasurement)
 {
-    constexpr float temperature_k = 300.0f;
-    constexpr float stretch_percent = 100.0f;
+    std::optional<Message> msg = feed({0x12, 0x21, 0x0b, 0xb9, 0x00, 0x41, 0x00, 0x05});
 
-    auto packet = createBinaryMeasurement(stretch_percent, temperature_k, 0x00);
-    packet[5] = 0xEE;
-
-    std::variant<StretchSensor::CalibratedMeasurement, StretchSensor::RawMeasurement> measurement{};
-    Result result = StretchSensor::parseMeasurement(
-            packet.data(),
-            packet.size(),
-            measurement);
-
-    EXPECT_EQ(result, Result::kChecksumError);
+    ASSERT_TRUE(msg.has_value());
+    auto* measurement = std::get_if<CalibratedMeasurement>(&*msg);
+    ASSERT_NE(measurement, nullptr);
+    EXPECT_FLOAT_EQ(measurement->percentage_stretch, 0.65f);
+    EXPECT_FLOAT_EQ(measurement->temperature_k, 300.1f);
+    EXPECT_EQ(measurement->mode, MeasurementFormat::kBinary);
 }
 
-
-TEST_F(ParseMeasurementsTest, RejectsBinarySensorErrorValue)
+TEST_F(ParserTest, ParsesCommand)
 {
-    constexpr uint16_t raw_temp = 0xBEEF;
-    constexpr uint16_t raw_stretch = 0x8000;
-
-    auto packet = createBinaryMeasurement(raw_stretch, raw_temp, 0x00);
-
-    Result result = StretchSensor::parseMeasurement(
-            packet.data(),
-            packet.size(),
-            measurement);
-
-    EXPECT_EQ(result, Result::kMeasurementFailed);
+    std::optional<Message> msg = feed("CP=1000\r\r");
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kConfigurePollingRate);
+    EXPECT_EQ(settings->value, 1000);
 }
 
-
-// ASCII calibrated tests
-
-TEST_F(ParseMeasurementsTest, ParsesAsciiCalibratedMeasurement)
+TEST_F(ParserTest, ParsesConfigurePwm)
 {
-    uint8_t packet[] =
-        "012.34%,300.0K";
+    std::optional<Message> msg = feed("CA=100\r\r");
 
-    Result result = StretchSensor::parseMeasurement(
-            packet,
-            14,
-            measurement);
-
-    EXPECT_EQ(result, Result::kSuccess);
-
-    ASSERT_TRUE(std::holds_alternative<StretchSensor::CalibratedMeasurement>(measurement));
-
-    auto value = std::get<StretchSensor::CalibratedMeasurement>(measurement);
-
-    EXPECT_FLOAT_EQ(value.percentage_stretch, 12.34f);
-    EXPECT_FLOAT_EQ(value.temperature_k, 300.0f);
-    EXPECT_EQ(value.mode, StretchSensor::OutputMode::kAscii);
-    EXPECT_EQ(value.status_flags, 0);
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kConfigurePwm);
+    EXPECT_EQ(settings->value, 100);
 }
 
-
-// ASCII raw tests
-
-TEST_F(ParseMeasurementsTest, ParsesAsciiRawMeasurement)
+TEST_F(ParserTest, ParsesCalibrationTempCoeff)
 {
-    uint8_t packet[] = "12345,300.0K";
+    std::optional<Message> msg = feed("CC=200\r\r");
 
-    Result result = StretchSensor::parseMeasurement(
-            packet,
-            12,
-            measurement);
-
-    EXPECT_EQ(result, Result::kSuccess);
-
-    ASSERT_TRUE(std::holds_alternative<StretchSensor::RawMeasurement>(measurement));
-
-    auto value = std::get<StretchSensor::RawMeasurement>(measurement);
-
-    EXPECT_EQ(value.raw_count, 12345);
-    EXPECT_FLOAT_EQ(value.temperature_k, 300.0f);
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kCalibrationTempCoeff);
+    EXPECT_EQ(settings->value, 200);
 }
 
-
-// Error cases
-
-TEST_F(ParseMeasurementsTest, ParsesSensorErrorMessage)
+TEST_F(ParserTest, ParsesCharacterData)
 {
-    uint8_t packet[] = "EAP error";
+    std::optional<Message> msg = feed("CD=1\r\r");
 
-    Result result = StretchSensor::parseMeasurement(
-            packet,
-            sizeof(packet) - 1,
-            measurement);
-
-    EXPECT_EQ(result, Result::kMeasurementFailed);
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kCharacterData);
+    EXPECT_EQ(settings->value, 1);
 }
 
-
-TEST_F(ParseMeasurementsTest, RejectsNullBuffer)
+TEST_F(ParserTest, ParsesConfigureLed)
 {
-    Result result = StretchSensor::parseMeasurement(
-            nullptr,
-            10,
-            measurement);
+    std::optional<Message> msg = feed("CL=2\r\r");
 
-    EXPECT_EQ(result, Result::kParseError);
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kConfigreLed);
+    EXPECT_EQ(settings->value, 2);
 }
 
-
-TEST_F(ParseMeasurementsTest, RejectsUnknownPacketFormat)
+TEST_F(ParserTest, ParsesCalibrationCurrent)
 {
-    uint8_t packet[] = "INVALID";
+    std::optional<Message> msg = feed("CI=500\r\r");
 
-    Result result = StretchSensor::parseMeasurement(
-            packet,
-            sizeof(packet) - 1,
-            measurement);
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kCalibrationCurrent);
+    EXPECT_EQ(settings->value, 500);
+}
 
-    EXPECT_EQ(result, Result::kParseError);
+TEST_F(ParserTest, ParsesConfigurePollingRate)
+{
+    std::optional<Message> msg = feed("CP=1000\r\r");
+
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kConfigurePollingRate);
+    EXPECT_EQ(settings->value, 1000);
+}
+
+TEST_F(ParserTest, ParsesCalibrationSpan)
+{
+    std::optional<Message> msg = feed("CS=5000\r\r");
+
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kCalibrationSpan);
+    EXPECT_EQ(settings->value, 5000);
+}
+
+TEST_F(ParserTest, ParsesCalibrationTemperature)
+{
+    std::optional<Message> msg = feed("CT=295\r\r");
+
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kCalibrationTemperature);
+    EXPECT_EQ(settings->value, 295);
+}
+
+TEST_F(ParserTest, ParsesCalibrationZero)
+{
+    std::optional<Message> msg = feed("CZ=0\r\r");
+
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kCalibrationZero);
+    EXPECT_EQ(settings->value, 0);
+}
+
+TEST_F(ParserTest, ParsesSerialNumberOne)
+{
+    std::optional<Message> msg = feed("S1=123456\r\r");
+
+    auto* settings = std::get_if<StringSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kSerialNumberOne);
+    EXPECT_STREQ(settings->value, "123456");
+}
+
+TEST_F(ParserTest, ParsesSerialNumberTwo)
+{
+    std::optional<Message> msg = feed("S2=789012\r\r");
+
+    auto* settings = std::get_if<StringSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kSerialNumberTwo);
+    EXPECT_STREQ(settings->value, "789012");
+}
+
+TEST_F(ParserTest, ParsesSensorAveraging)
+{
+    std::optional<Message> msg = feed("SA=16\r\r");
+
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kSensorAveraging);
+    EXPECT_EQ(settings->value, 16);
+}
+
+TEST_F(ParserTest, ParsesSensorFirmware)
+{
+    std::optional<Message> msg = feed("SF=1.2.3\r\r");
+
+    auto* settings = std::get_if<StringSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kSensorFirmware);
+    EXPECT_STREQ(settings->value, "1.2.3");
+}
+
+TEST_F(ParserTest, ParsesSensorLength)
+{
+    std::optional<Message> msg = feed("SL=50\r\r");
+
+    auto* settings = std::get_if<IntegerSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kSensorLength);
+    EXPECT_EQ(settings->value, 50);
+}
+
+TEST_F(ParserTest, ParsesSerialNumber)
+{
+    std::optional<Message> msg = feed("SN=ABC123\r\r");
+
+    auto* settings = std::get_if<StringSetting>(&*msg);
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->setting, Setting::kSerialNumber);
+    EXPECT_STREQ(settings->value, "ABC123");
 }

@@ -8,35 +8,123 @@ namespace
 {
 using namespace Mateligent::StretchableSensor;
 
-bool isValidAsciiCharacter(const char character)
-{
-    return std::isalnum(character) ||
-           character == '%' ||
-           character == '.' ||
-           character == ' ' ||
-           character == '\r';
-}
-
 constexpr uint16_t kMinTemperatureDeciKelvin = 1731;
 constexpr uint16_t kMaxTemperatureDeciKelvin = 3731;
 constexpr uint16_t kMaxStrainHundrethsPercent = 0x7FFF;
 constexpr uint16_t kErrorStrainValue = 0x8000;
-constexpr uint8_t kValidStatus1 = 0x01;
-constexpr uint8_t kValidStatus2 = 0x20;
+constexpr uint8_t kSensorErrorFlag = 0x01;
+constexpr uint8_t kSensorSaturatedFlag = 0x20;
 
-bool isValidBinaryTemperature(const uint16_t binary_temp)
+inline bool isValidBinaryTemperature(const uint16_t binary_temp)
 {
     return binary_temp >= kMinTemperatureDeciKelvin && binary_temp <= kMaxTemperatureDeciKelvin;
 }
 
-bool isValidBinaryStrain(const uint16_t binary_strain)
+inline bool isValidBinaryStrain(const uint16_t binary_strain)
 {
     return binary_strain <= kMaxStrainHundrethsPercent || binary_strain == kErrorStrainValue;
 }
 
-bool isValidBinaryStatus(const uint8_t status)
+inline bool isValidBinaryStatus(const uint8_t status)
 {
-    return status == kValidStatus1 || status == kValidStatus2;
+    return status == kSensorErrorFlag || status == kSensorSaturatedFlag || status == 0x00;
+}
+
+inline bool isValidAsciiCharacter(const char character)
+{
+    return std::isalnum(character) ||
+           character == '%' ||
+           character == '.' ||
+           character == ',' ||
+           character == ' ' ||
+           character == '=' ||
+           character == '\r';
+}
+
+inline std::optional<Message> parseSettingsData(etl::string_view cmd_str)
+{
+    etl::string_view postfix_str = etl::string_view(cmd_str);
+    postfix_str.remove_prefix(3);
+    etl::to_arithmetic_result result =  etl::to_arithmetic<uint16_t>(postfix_str);
+    
+    Setting setting = commandToSetting(etl::string_view(cmd_str.substr(0, 2)));
+    
+    if (result.has_value())
+    {
+        return IntegerSetting {
+            .value = result.value(),
+            .setting = setting
+        };
+    }
+
+    StringSetting string_setting{};
+    postfix_str.copy(string_setting.value, sizeof(string_setting.value));
+    string_setting.setting = setting;
+
+    return string_setting;
+}
+
+inline std::optional<Message> parseFirmwareVersion(etl::string_view cmd_str)
+{
+    StringSetting firmware_settings = {};
+    cmd_str.copy(firmware_settings.value, sizeof(firmware_settings.value));
+    firmware_settings.setting = Setting::kSensorFirmware;
+    return firmware_settings;
+}
+
+inline LogMessage createLogMessage(etl::string_view msg)
+{
+    LogMessage log{};
+    msg.copy(log.value, sizeof(log.value));
+    return log;       
+}
+
+inline std::optional<Message> parseCalibratedMeasurement(etl::string_view cmd_str)
+{
+    size_t strain_end = cmd_str.find('%');
+    size_t temp_end = cmd_str.find("K");
+
+    etl::string_view strain_str = etl::string_view(cmd_str.data(), strain_end);
+    etl::string_view temp_str = etl::string_view(cmd_str.data() + strain_end + 2, temp_end - strain_end - 2);
+
+    etl::to_arithmetic_result strain_res =  etl::to_arithmetic<float>(strain_str);
+    etl::to_arithmetic_result temp_res =  etl::to_arithmetic<float>(temp_str);
+
+    if (!strain_res.has_value() || !temp_res.has_value())
+    {
+        return createLogMessage(cmd_str);  
+    }
+
+    return CalibratedMeasurement{
+        .percentage_stretch = strain_res.value(),
+        .temperature_k = temp_res.value(),
+        .mode = MeasurementFormat::kAscii,
+        .status_flags = 0x00
+    };  
+}
+
+inline std::optional<Message> parseRawMeasurement(etl::string_view cmd_str)
+{
+    RawMeasurement raw_measurement{};
+
+    size_t strain_end = cmd_str.find(',');
+    size_t temp_end = cmd_str.find("K");
+
+    etl::string_view raw_strain_str = etl::string_view(cmd_str.data(), strain_end);
+    etl::string_view temp_str = etl::string_view(cmd_str.data() + strain_end + 1, temp_end - strain_end - 1);
+
+    etl::to_arithmetic_result raw_res =  etl::to_arithmetic<uint16_t>(raw_strain_str);
+    etl::to_arithmetic_result temp_res =  etl::to_arithmetic<float>(temp_str);
+
+    if (!raw_res.has_value() || !temp_res.has_value())
+    {
+        return createLogMessage(cmd_str);
+    }
+
+    return RawMeasurement{
+        .raw_count = raw_res.value(),
+        .temperature_k = temp_res.value()
+    };    
 }
 
 } // namespace
@@ -50,17 +138,17 @@ std::optional<Message> Parser::feedAsciiParser(const uint8_t byte)
     constexpr size_t kMinimumValidFrameSize = 3;
     
     const char character = static_cast<const char>(byte);
-    const bool string_overflowed = ascii_str_.full();
+    const bool string_overflowed = cmd_str_.full();
     const bool frame_completed = character == '\r';
     
     // Framing
     if (!isValidAsciiCharacter(character) || string_overflowed)
     {
-        ascii_str_.erase(0, ascii_str_.size());
+        cmd_str_.erase(0, cmd_str_.size());
     }
     else if (character != ' ' && character != '\r') 
     {
-        ascii_str_.push_back(character);
+        cmd_str_.push_back(character);
     }
     
     if (!frame_completed)
@@ -69,9 +157,9 @@ std::optional<Message> Parser::feedAsciiParser(const uint8_t byte)
     }
 
     // Parsing a complete frame
-    if (frame_completed && ascii_str_.size() <= kMinimumValidFrameSize)
+    if (frame_completed && cmd_str_.size() <= kMinimumValidFrameSize)
     {
-        ascii_str_.erase(0, ascii_str_.size());
+        cmd_str_.erase(0, cmd_str_.size());
         return std::nullopt;
     }
 
@@ -82,14 +170,14 @@ std::optional<Message> Parser::feedAsciiParser(const uint8_t byte)
     //     00000,000.0K for uncalibrated measurement
     //     Anything else is an arbitruary log message
 
-    const bool has_comma   = ascii_str_.contains(',');
-    const bool has_decimal = ascii_str_.contains('.');
-    const bool has_percent = ascii_str_.contains('%');
-    const bool ends_with_k = !ascii_str_.empty() && ascii_str_.back() == 'K';
+    const bool has_comma   = cmd_str_.contains(',');
+    const bool has_decimal = cmd_str_.contains('.');
+    const bool has_percent = cmd_str_.contains('%');
+    const bool ends_with_k = !cmd_str_.empty() && cmd_str_.back() == 'K';
 
-    etl::string_view command_identifier    = etl::string_view(ascii_str_.data(), 2);
-    const bool contains_command_prefix     = commandToSetting(command_identifier) != Setting::kUnknown && ascii_str_.at(2) == '=';
-    const bool is_firmware_version         = ascii_str_.starts_with("AX-008");
+    etl::string_view command_identifier    = etl::string_view(cmd_str_.data(), 2);
+    const bool contains_command_prefix     = commandToSetting(command_identifier) != Setting::kUnknown && cmd_str_.at(2) == '=';
+    const bool is_firmware_version         = cmd_str_.starts_with("AX-008");
     const bool is_calibrated_measurement   = has_comma && has_decimal && has_percent && ends_with_k;
     const bool is_uncalibrated_measurement = has_comma && has_decimal && !has_percent && ends_with_k;;
     
@@ -103,94 +191,22 @@ std::optional<Message> Parser::feedAsciiParser(const uint8_t byte)
 
     if (contains_command_prefix)
     {
-        etl::string_view postfix_str = etl::string_view(ascii_str_);
-        postfix_str.remove_prefix(3);
-        etl::to_arithmetic_result result =  etl::to_arithmetic<uint16_t>(postfix_str);
-        
-        Setting setting = commandToSetting(etl::string_view(ascii_str_.data(), 2));
-        
-        if (result.has_value())
-        {
-            IntegerSetting data {
-                .value = 0xFFFF,
-                .setting = setting
-            };
-
-            msg = data;
-        }
-        else 
-        {
-            StringSetting data{};
-            postfix_str.copy(data.value, sizeof(data.value));
-            data.setting = setting;
-
-            msg = data;
-        }
+        return parseSettingsData(cmd_str_);
     }
     else if (is_firmware_version)
     {
-        StringSetting data = {};
-        ascii_str_.copy(data.value, sizeof(data.value));
-        data.setting = Setting::kSensorFirmware;
-
-        msg = data;
+        return parseFirmwareVersion(cmd_str_);
     }
     else if (is_calibrated_measurement)
     {
-        size_t strain_end = ascii_str_.find('%');
-        size_t temp_end = ascii_str_.find("K");
-
-        etl::string_view strain_str = etl::string_view(ascii_str_.data(), strain_end);
-        etl::string_view temp_str = etl::string_view(ascii_str_.data() + strain_end + 2, temp_end - strain_end - 2);
-
-        etl::to_arithmetic_result strain_res =  etl::to_arithmetic<float>(strain_str);
-        etl::to_arithmetic_result temp_res =  etl::to_arithmetic<float>(temp_str);
-
-        if (!strain_res.has_value() || !temp_res.has_value())
-        {
-            msg = createLogMessage(ascii_str_);
-        }
-        else
-        {
-            msg = CalibratedMeasurement{
-                .percentage_stretch = strain_res.value(),
-                .temperature_k = temp_res.value(),
-                .mode = MeasurementFormat::kAscii,
-                .status_flags = 0x00
-            };
-        }
+        return parseCalibratedMeasurement(cmd_str_);
     }
     else if (is_uncalibrated_measurement)
     {
-        RawMeasurement raw_measurement{};
-
-        size_t strain_end = ascii_str_.find(',');
-        size_t temp_end = ascii_str_.find("K");
-
-        etl::string_view raw_strain_str = etl::string_view(ascii_str_.data(), strain_end);
-        etl::string_view temp_str = etl::string_view(ascii_str_.data() + strain_end + 1, temp_end - strain_end - 1);
-
-        etl::to_arithmetic_result raw_res =  etl::to_arithmetic<uint16_t>(raw_strain_str);
-        etl::to_arithmetic_result temp_res =  etl::to_arithmetic<float>(temp_str);
-
-        if (!raw_res.has_value() || !temp_res.has_value())
-        {
-            msg = createLogMessage(ascii_str_);
-        }
-        else
-        {
-            msg = RawMeasurement{
-                .raw_count = raw_res.value(),
-                .temperature_k = temp_res.value()
-            };    
-        }
-    }
-    else
-    {
-        msg = createLogMessage(ascii_str_);
+        return parseRawMeasurement(cmd_str_);
     }
 
-    return msg;
+    return createLogMessage(cmd_str_);
 }
 
 std::optional<Message> Parser::feedBinaryParser(const uint8_t byte)
@@ -199,6 +215,10 @@ std::optional<Message> Parser::feedBinaryParser(const uint8_t byte)
     {
         prev_bytes_.push(byte);
         checksum_value_ += byte;
+    }
+
+    if (!prev_bytes_.full())
+    {
         return std::nullopt;
     }
 
@@ -207,11 +227,10 @@ std::optional<Message> Parser::feedBinaryParser(const uint8_t byte)
     const uint8_t status = prev_bytes_[4];
     const uint8_t checksum = prev_bytes_[5];
 
-
     if (!isValidBinaryTemperature(temperature) || 
         !isValidBinaryStrain(strain) ||
         !isValidBinaryStatus(status) ||
-        checksum != checksum_value_)
+        checksum != checksum_value_ - checksum)
     {
         uint8_t value = prev_bytes_.front();
         checksum_value_ -= value;
@@ -243,6 +262,5 @@ std::optional<Message> Parser::feed(const uint8_t byte)
 
     return std::nullopt;
 }
-
 
 } // namespace Mateligent::StretchableSensor
