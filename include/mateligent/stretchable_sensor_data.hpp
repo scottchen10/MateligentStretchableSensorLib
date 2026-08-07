@@ -18,7 +18,7 @@ enum class Setting : uint8_t
     kConfigurePwm,           // 3ai
     kCalibrationTempCoeff,   // 3aiii
     kCharacterData,          // 3aiv
-    kConfigreLed,            // 3av
+    kConfigureLed,            // 3av
     kCalibrationCurrent,     // 3avi
     kConfigurePollingRate,   // 3avii
     kCalibrationSpan,        // 3aix
@@ -45,7 +45,7 @@ constexpr CommandMapping kCommandMappings[] = {
     {"CR", Setting::kConfigurationRecord},
     {"SS", Setting::kSensorSleep},
     {"CD", Setting::kCharacterData},
-    {"CL", Setting::kConfigreLed},
+    {"CL", Setting::kConfigureLed},
     {"CI", Setting::kCalibrationCurrent},
     {"CP", Setting::kConfigurePollingRate},
     {"CS", Setting::kCalibrationSpan},
@@ -89,6 +89,12 @@ inline void buildSettingCommand(Setting setting, uint16_t count, char *buffer, s
 {
     
     snprintf(buffer, len, "%s=%d\r", settingToCommand(setting), count);
+}
+
+inline void buildQueryCommand(Setting setting, char *buffer, size_t len)
+{
+    
+    snprintf(buffer, len, "%s?\r", settingToCommand(setting));
 }
 
 // Settings can only be defined as string or 2 byte integer responses
