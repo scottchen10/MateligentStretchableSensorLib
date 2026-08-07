@@ -101,12 +101,12 @@ inline void buildQueryCommand(Setting setting, char *buffer, size_t len)
 struct StringSetting
 {
     Setting setting;
-    char value[16];
+    char value[32];
 };
 
 struct LogMessage
 {
-    char value[16];
+    char value[32];
 };
 
 struct IntegerSetting

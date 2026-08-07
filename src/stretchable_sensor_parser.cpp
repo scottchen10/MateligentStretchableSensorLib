@@ -38,6 +38,8 @@ inline bool isValidAsciiCharacter(const char character)
            character == ',' ||
            character == ' ' ||
            character == '=' ||
+           character == '-' ||
+           character == '_' ||
            character == '\r';
 }
 
@@ -183,7 +185,7 @@ std::optional<Message> Parser::feedAsciiParser(const uint8_t byte)
     
     std::optional<Message> msg = std::nullopt;
 
-    auto createLogMessage = [](etl::string<16>& str) -> LogMessage {
+    auto createLogMessage = [](etl::string<32>& str) -> LogMessage {
         LogMessage log{};
         str.copy(log.value, sizeof(log.value));
         return log;
