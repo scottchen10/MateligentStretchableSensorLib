@@ -216,7 +216,6 @@ std::optional<Message> Parser::feedBinaryParser(const uint8_t byte)
     if (!prev_bytes_.full())
     {
         prev_bytes_.push(byte);
-        checksum_value_ += byte;
     }
 
     if (!prev_bytes_.full())
@@ -229,17 +228,25 @@ std::optional<Message> Parser::feedBinaryParser(const uint8_t byte)
     const uint8_t status = prev_bytes_[4];
     const uint8_t checksum = prev_bytes_[5];
 
+    const uint8_t expected_checksum =
+        prev_bytes_[0] +
+        prev_bytes_[1] +
+        prev_bytes_[2] +
+        prev_bytes_[3] +
+        prev_bytes_[4];
+    
     if (!isValidBinaryTemperature(temperature) || 
         !isValidBinaryStrain(strain) ||
         !isValidBinaryStatus(status) ||
-        checksum != checksum_value_ - checksum)
+        checksum != expected_checksum)
     {
         uint8_t value = prev_bytes_.front();
-        checksum_value_ -= value;
         prev_bytes_.pop();        
         return std::nullopt;
     }
-
+    
+    prev_bytes_.clear();
+    
     return CalibratedMeasurement{
         .percentage_stretch = static_cast<float>(strain) / 100.0f,
         .temperature_k = static_cast<float>(temperature) / 10.0f,
@@ -250,7 +257,9 @@ std::optional<Message> Parser::feedBinaryParser(const uint8_t byte)
 
 void Parser::reset()
 {
-    cmd_str_.erase(0, cmd_str_.size());
+    cmd_str_.clear();
+    prev_bytes_.clear();
+    queued_messages_.clear();
 }
 
 bool Parser::feed(const uint8_t byte)
