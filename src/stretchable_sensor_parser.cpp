@@ -1,8 +1,10 @@
-#include "mateligent/stretchable_sensor_parser.hpp"
 #include <cctype>
-#include <etl/circular_buffer.h>
 #include <optional>
+
+#include <etl/circular_buffer.h>
 #include "etl/to_arithmetic.h"
+
+#include "mateligent/stretchable_sensor_parser.hpp"
 
 namespace 
 {
@@ -295,8 +297,10 @@ std::optional<Message> Parser::consume()
     {
         return std::nullopt;
     }
+
     Message msg = queued_messages_.front();
     queued_messages_.pop();
+    
     return msg;
 }
 

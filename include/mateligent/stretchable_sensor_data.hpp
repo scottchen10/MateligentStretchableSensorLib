@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <variant>
 #include <stdio.h>
+
 #include "etl/string_view.h"
 
 namespace Mateligent::StretchableSensor
